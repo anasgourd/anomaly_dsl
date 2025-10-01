@@ -109,13 +109,13 @@ CUSTOM:
 ;
 
 OneClassSVM:
-    'model' 'OneClassSVM' '(' (nu=FLOAT)? ')'
+    'model' 'OneClassSVM' ('(' nu=FLOAT ')')?
 ;
 StandardAbsoluteDeviation:
     'model'  'StandardAbsoluteDeviation'
     (param=STRING)?
+    
 ;
-
 
 GaussianScorer:
     'model' 'GaussianScorer'
