@@ -1,0 +1,25 @@
+Profile default
+    start_index 1000
+    threshold 0.90
+end
+redis_db my_redis
+    host "localhost"
+    port 6379
+    db 0
+    key_scores "anomaly_scores"
+    key_alerts "anomaly_alerts"
+end
+Broker<MQTT> local
+    host: "localhost"
+    port: 1883
+end
+AnomalySpec detectTemp
+    broker local
+    topic "machine/temperature"
+    attribute "value"
+    model SNARIMAX
+    profile default
+    output "results.csv"
+    alerts "alerts.csv"
+    redis my_redis
+end

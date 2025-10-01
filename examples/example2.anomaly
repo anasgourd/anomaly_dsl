@@ -1,0 +1,39 @@
+Preprocessing standard
+    method: StandardScaler
+end
+
+Profile default
+    start_index 1000
+    threshold 0.8
+end
+
+Broker<MQTT> local
+    host: "localhost"
+    port: 1883
+end
+
+redis_db my_redis
+    host "localhost"
+    port 6379
+    db 0
+    key_scores "anomaly_scores"
+    key_alerts "anomaly_alerts"
+end
+
+AnomalySpec detectTemp
+    broker local
+    topic "machine/temperature"
+    attribute "value"
+    preprocessor standard
+    model StandardAbsoluteDeviation
+    profile default
+    output
+        topic "machine/temperature/results"
+        broker local
+    end
+    alerts
+        topic "machine/temperature/alerts"
+        broker local
+    end
+    redis my_redis
+end

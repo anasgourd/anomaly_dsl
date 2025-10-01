@@ -1,0 +1,80 @@
+Preprocessing standard
+    method: StandardScaler
+end
+
+Preprocessing minmax
+    method: MinMaxScaler
+end
+
+Profile default
+    start_index 1000
+    threshold 0.80
+end
+
+Profile strict
+    start_index 500
+    threshold 0.95
+end
+
+Broker<MQTT> local
+    host: "localhost"
+    port: 1883
+end
+
+Broker<MQTT> hivemq_cloud
+    host: "example-hivemq-broker.s1.eu.hivemq.cloud"
+    port: 8883
+    ssl: True
+    auth:
+        username: "USERNAME"
+        password: "PASSWORD"
+end
+
+Broker<MQTT> flespi_broker
+    host: "mqtt.flespi.io"
+    port: 1883
+    auth:
+        key: "API_KEY"
+end
+
+Broker<MQTT> mosquitto_broker
+    host: "test.mosquitto.org"
+    port: 1883
+end
+
+Broker<MQTT> mqtt_dashboard
+    host: "mqtt-dashboard.com"
+    port: 8884
+    basePath: ""
+    webPath: "mqtt-dashboard.com"
+    webPort: 8884
+    ssl: True
+end
+
+redis_db my_redis
+    host "localhost"
+    port 6379
+    db 0
+    key_scores "anomaly_scores"
+    key_alerts "anomaly_alerts"
+end
+
+Evaluation Eval
+    data_file "input.csv"
+    scores_file "results.csv"
+    labels_file "labels.csv"
+    anomalies_file "alerts.csv"
+    metrics F1Score, Precision, Recall, Accuracy, ROCAUC
+end
+
+AnomalySpec detectTemp
+    broker hivemq_cloud
+    topic "machine/temperature"
+    attribute "value"
+    preprocessor minmax
+    model StandardAbsoluteDeviation
+    profile strict
+    output "results.csv"
+    alerts "alerts.csv"
+    redis my_redis
+end
