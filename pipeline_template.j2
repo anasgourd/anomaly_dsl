@@ -1,0 +1,466 @@
+import time
+import paho.mqtt.client as mqtt
+from river import anomaly, compose, preprocessing, time_series, linear_model, optim,feature_extraction
+from sklearn.metrics import f1_score, precision_score, recall_score, roc_auc_score,accuracy_score
+import numpy as np
+import pandas as pd
+import json
+
+
+# MQTT and model parameters from DSL
+mqtt_host = "{{ spec.broker.host }}"
+mqtt_port = {{ spec.broker.port }}
+mqtt_topic = "{{ spec.topic }}"
+attribute = "{{ spec.attribute }}"
+
+{% if spec.broker.auth is not none %}
+    {% if 'key' in spec.broker.auth %}
+mqtt_username = "{{ spec.broker.auth.key }}"
+mqtt_password = ""
+    {% elif 'username' in spec.broker.auth and 'password' in spec.broker.auth %}
+mqtt_username = "{{ spec.broker.auth.username }}"
+mqtt_password = "{{ spec.broker.auth.password }}"
+    {% else %}
+mqtt_username = ""
+mqtt_password = ""
+    {% endif %}
+{% else %}
+mqtt_username = ""
+mqtt_password = ""
+{% endif %}
+
+mqtt_ssl = {{ 'True' if spec.broker.ssl else 'False' }}
+
+mqtt_webPath = {{ 'None' if spec.broker.webPath is none else '"' ~ spec.broker.webPath ~ '"' }}
+mqtt_webPort = {{ 'None' if spec.broker.webPort is none else spec.broker.webPort }}
+
+threshold = {{ spec.profile.threshold }}
+start_index = {{ spec.profile.start_index }}
+{% if evaluation %}
+evaluation = {
+    "name": "{{ evaluation.name }}",
+    "labels_file": "{{ evaluation.labels_file }}",
+    "anomalies_file": "{{ evaluation.anomalies_file }}",
+    "scores_file": "{{ evaluation.scores_file }}",
+    "metrics": {{ evaluation.metrics }}
+}
+{% else %}
+evaluation = None
+{% endif %}
+
+{% if spec.redis is not none %}
+import redis
+
+redis_client = redis.Redis(
+    host="{{ spec.redis.host }}",
+    port={{ spec.redis.port }},
+    db={{ spec.redis.db }}
+)
+redis_scores_key = "{{ spec.redis.key_scores | default('anomaly_scores') }}"
+redis_alerts_key = "{{ spec.redis.key_alerts | default('anomaly_alerts') }}"
+{% endif %}
+
+{% if spec.output.type == "file" %}
+output_path = "{{ spec.output.path }}"
+def write_score(value, score):
+    with open(output_path, "a") as f:
+        flat_scores = np.array(score).flatten()
+        for s in flat_scores:
+            f.write(f"{s}\n")
+
+       
+{% elif spec.output.type == "mqtt" %}
+output_topic = "{{ spec.output.topic }}"
+output_broker_host = "{{ spec.output.broker.host }}"
+output_broker_port = {{ spec.output.broker.port }}
+output_ssl= {{ 'True' if spec.output.broker.ssl else 'False' }}
+
+{% if spec.output.broker.auth is not none %}
+    {% if 'key' in spec.output.broker.auth %}
+output_username = "{{ spec.output.broker.auth.key }}"
+output_password = ""
+    {% elif 'username' in spec.output.broker.auth and 'password' in spec.output.broker.auth %}
+output_username = "{{ spec.output.broker.auth.username }}"
+output_password = "{{ spec.output.broker.auth.password }}"
+    {% else %}
+output_username = ""
+output_password = ""
+    {% endif %}
+{% else %}
+output_username = ""
+output_password = ""
+{% endif %}
+
+output_webPath = {{ 'None' if spec.output.broker.webPath is none else '"' ~ spec.output.broker.webPath ~ '"' }}
+use_output_websockets = True if output_webPath!="" else False
+if use_output_websockets:
+    mqtt_output_client = mqtt.Client(transport="websockets")
+else:
+    mqtt_output_client = mqtt.Client()
+
+
+if output_ssl:
+    mqtt_output_client.tls_set()
+    mqtt_output_client.tls_insecure_set(True)
+if output_username or output_password:
+    mqtt_output_client.username_pw_set(output_username, output_password)
+mqtt_output_client.connect(output_broker_host, output_broker_port)
+mqtt_output_client.loop_start()
+
+
+
+def write_score(value,score):
+    if isinstance(value, list):
+        for v, s in zip(value, score):
+            payload = json.dumps({"value": v, "score": s})
+            mqtt_output_client.publish(output_topic, payload)
+    else:
+        payload = json.dumps({"value": value, "score": score})
+        mqtt_output_client.publish(output_topic, payload)      
+{% endif %}
+
+
+{% if spec.alerts.type == "file" %}
+alerts_path = "{{ spec.alerts.path }}"
+def write_anomalies(value, is_anomaly):
+    with open(alerts_path, "a") as f:
+        flat_alerts=np.array(is_anomaly).flatten()
+        for s in flat_alerts:
+            f.write(f"{int(s)}\n")
+        
+
+{% elif spec.alerts.type == "mqtt" %}
+alerts_topic = "{{ spec.alerts.topic }}"
+alerts_broker_host = "{{ spec.alerts.broker.host }}"
+alerts_broker_port = {{ spec.alerts.broker.port }}
+alerts_ssl= {{ 'True' if spec.alerts.broker.ssl else 'False' }}
+{% if spec.alerts.broker.auth is not none %}
+    {% if 'key' in spec.alerts.broker.auth %}
+alerts_username = "{{ spec.alerts.broker.auth.key }}"
+alerts_password = ""
+    {% elif 'username' in spec.alerts.broker.auth and 'password' in spec.alerts.broker.auth %}
+alerts_username = "{{ spec.alerts.broker.auth.username }}"
+alerts_password = "{{ spec.alerts.broker.auth.password }}"
+    {% else %}
+alerts_username = ""
+alerts_password = ""
+    {% endif %}
+{% else %}
+alerts_username = ""
+alerts_password = ""
+{% endif %}
+
+alerts_webPath = {{ 'None' if spec.alerts.broker.webPath is none else '"' ~ spec.alerts.broker.webPath ~ '"' }}
+use_alerts_websockets = True if alerts_webPath!="" else False
+if use_alerts_websockets:
+    mqtt_alert_client = mqtt.Client(transport="websockets")
+else:
+    mqtt_alert_client = mqtt.Client()
+
+if alerts_ssl:
+    mqtt_alert_client.tls_set()
+    mqtt_alert_client.tls_insecure_set(True)
+if alerts_username or alerts_password:
+    mqtt_alert_client.username_pw_set(alerts_username, alerts_password)
+mqtt_alert_client.connect(alerts_broker_host, alerts_broker_port)
+mqtt_alert_client.loop_start()
+def write_anomalies(value, is_anomaly):
+    if isinstance(value, list):
+        for v, s in zip(value, is_anomaly):
+            payload = json.dumps({"value": v, "anomaly": int(s)})
+            mqtt_alert_client.publish(alerts_topic, payload)
+    else:
+        payload = json.dumps({"value": value, "anomaly": int(is_anomaly)})
+        mqtt_alert_client.publish(alerts_topic, payload)
+{% endif %}
+
+start_index = int(start_index)
+
+{% if spec.preprocessor_method == "StandardScaler" %}
+preproc_instance = preprocessing.StandardScaler()
+{% elif spec.preprocessor_method == "MinMaxScaler" %}
+preproc_instance = preprocessing.MinMaxScaler()
+{% else %}
+preproc_instance = None
+{% endif %}
+
+
+{% if spec.model_name == "StandardAbsoluteDeviation" %}
+anomaly_model = anomaly.StandardAbsoluteDeviation()
+quantile_filter = anomaly.QuantileFilter(anomaly_model, q={{ spec.profile.threshold }})
+{% elif spec.model_name == "GaussianScorer" %}
+window_size = {{ spec.model.window_size if spec.model.window_size is not none else 100 }}
+anomaly_model = anomaly.GaussianScorer(window_size=window_size, grace_period=20)
+quantile_filter = anomaly.QuantileFilter(anomaly_model, q={{ spec.profile.threshold }})
+{% elif spec.model_name == "OneClassSVM" %}
+nu = {{ spec.model.nu if spec.model.nu else 0.1 }}
+base_model = anomaly.OneClassSVM(nu=nu)
+anomaly_model = anomaly.QuantileFilter(base_model, q={{ spec.profile.threshold }})
+
+{% elif spec.model_name == "HalfSpaceTrees" %}
+base_model = anomaly.HalfSpaceTrees(
+    n_trees={{ spec.model.n_trees if spec.model.n_trees else 25 }},
+    height={{ spec.model.height if spec.model.height else 15 }},
+    window_size={{ spec.model.window_size if spec.model.window_size else 250 }},
+    seed={{ spec.model.seed if spec.model.seed else 42 }}
+)
+anomaly_model = anomaly.QuantileFilter(base_model, q={{ spec.profile.threshold }})
+{% elif spec.model_name == "SNARIMAX" %}
+p = {{ spec.model.p if spec.model.p  else 1 }}
+d = {{ spec.model.d if spec.model.d  else 0 }}
+q = {{ spec.model.q if spec.model.q  else 1 }}
+m = {{ spec.model.m if spec.model.m  else 1 }}
+sd = {{ spec.model.sd if spec.model.sd else 0 }}
+learning_rate = {{ spec.model.learning_rate if spec.model.learning_rate is not none else 0.005 }}
+regressor_name = "{{ spec.model.regressor if spec.model.regressor is not none else 'LinearRegression' }}"
+
+regressor = None 
+if regressor_name == "LinearRegression":
+    regressor = (preproc_instance | linear_model.LinearRegression(optimizer=optim.SGD(learning_rate))) if preproc_instance else linear_model.LinearRegression(optimizer=optim.SGD(learning_rate))
+snarimax_model = time_series.SNARIMAX(p=p, d=d, q=q, m=m, sd=sd,regressor=regressor)
+base_model = anomaly.PredictiveAnomalyDetection(snarimax_model, horizon=1, n_std=3.5, warmup_period=0)
+anomaly_model = anomaly.QuantileFilter(base_model, q={{ spec.profile.threshold }})
+
+{% elif spec.model_name == "CUSTOM" %}
+from adapters.universal_adapter import UniversalAdapter
+from models.CUSTOM_MODEL import CUSTOM_Detector
+
+
+{% if spec.model.batch_size %}
+batch_size = {{ spec.model.batch_size }}
+anomaly_model = CUSTOM_Detector(batch_size=batch_size, start_index=start_index, threshold=threshold)
+adapter = UniversalAdapter(anomaly_model, batch_size=batch_size)
+{% else %}
+anomaly_model = CUSTOM_Detector(start_index=start_index, threshold=threshold)
+adapter = UniversalAdapter(anomaly_model)
+{% endif %}
+
+
+
+{% else %}
+raise ValueError("Unsupported model: {{ spec.model_name }}")
+{% endif %}
+
+{% set river_models = ["StandardAbsoluteDeviation","GaussianScorer","OneClassSVM","HalfSpaceTrees","SNARIMAX"] %}
+{% set is_river = spec.model_name in river_models %}
+
+cnt = 0
+training_buffer = []
+
+
+def handle_standard_model(x_val):
+    global cnt
+    cnt += 1
+
+    # Learn preprocessor incrementally
+    if preproc_instance:
+        preproc_instance.learn_one({'x': x_val})
+        x_val_scaled = preproc_instance.transform_one({'x': x_val})['x']
+    else:
+        x_val_scaled = x_val
+
+    # During training phase
+    if cnt <= start_index:
+        anomaly_model.learn_one(None,x_val_scaled)
+        score = anomaly_model.score_one(None,x_val_scaled)
+        quantile_filter.learn_one(None,score)
+        return 0.0, 0  # No detection yet
+
+    # After training: detection
+    score = anomaly_model.score_one(None,x_val_scaled)
+    is_anomaly = quantile_filter.classify(score)
+    #anomaly_model.learn_one(None,x_val_scaled)
+
+    return score, is_anomaly
+
+def handle_custom_model(batch_values):
+    return anomaly_model.handleBatch(batch_values)
+
+def handle_svm_hs(x_val):
+    global cnt
+    cnt += 1
+    # Wrap input for consistency with River format
+    x_dict = {'x': x_val}
+
+    # Preprocessing
+    if preproc_instance:
+        preproc_instance.learn_one(x_dict)
+        x_val_scaled = preproc_instance.transform_one(x_dict)['x']
+    else:
+        x_val_scaled = x_val
+    x_dict = {'x': x_val_scaled}
+
+    # Training phase
+    if cnt <= start_index:
+        anomaly_model.learn_one(x_dict)
+        return 0.0, 0  # Still warming up
+
+    # Detection phase
+    score = anomaly_model.score_one(x_dict)
+    is_anomaly = anomaly_model.classify(score)
+    return score, is_anomaly   
+    
+def handle_arima_model(x_val):
+    global cnt
+    cnt += 1
+
+    if preproc_instance:
+        preproc_instance.learn_one({'x': x_val})
+        x_val = preproc_instance.transform_one({'x': x_val})['x']
+    else:
+        x_val = x_val
+
+    if cnt <= start_index:
+        anomaly_model.learn_one(None,x_val)
+        return 0.0, 0   # score=0, no alert
+
+    score = anomaly_model.score_one(None,x_val)
+    
+    if score is None or np.isnan(score) or np.isinf(score):
+        return 0.0, 0
+    score = np.clip(score, -1e6, 1e6)
+
+    is_anomaly = anomaly_model.classify(score)
+    
+    return score, is_anomaly
+
+def load_values(path):
+    df = pd.read_csv(path, header=None)
+    return df.iloc[:, 0]
+
+def on_message(client, userdata, message):
+    try:
+        payload = json.loads(message.payload.decode())
+        x_val = float(payload.get(attribute))
+
+        {% if is_river %}
+        # ---- RIVER path ----
+        {% if spec.model_name in ["OneClassSVM", "HalfSpaceTrees"] %}
+        score, is_anomaly = handle_svm_hs(x_val)
+        {% elif spec.model_name == "SNARIMAX" %}
+        score, is_anomaly = handle_arima_model(x_val)
+        {% else %}
+        score, is_anomaly = handle_standard_model(x_val)
+        {% endif %}
+
+        write_score(x_val, score)
+        write_anomalies(x_val, is_anomaly)
+        {% if spec.redis is not none %}
+        redis_client.rpush(redis_scores_key, json.dumps({"value": x_val, "score": score}))
+        if is_anomaly:
+            redis_client.rpush(redis_alerts_key, json.dumps({"value": x_val, "score": score}))
+        {% endif %}
+        print(f"Received value: {x_val}, Score: {score}")
+        if is_anomaly:
+            print(f"ALERT: Anomaly detected for value: {x_val}, Score: {score}")
+
+        {% else %}
+        # ---- CUSTOM/BATCH path via UniversalAdapter ----
+        vals, scores, flags = adapter.feed(x_val)
+        if vals is None:
+            return
+
+        write_score(vals, scores)
+        write_anomalies(vals, flags)
+        {% if spec.redis is not none %}
+        for v, s, a in zip(vals, scores, flags):
+            redis_client.rpush(redis_scores_key, json.dumps({"value": v, "score": s}))
+            if a:
+                redis_client.rpush(redis_alerts_key, json.dumps({"value": v, "score": s}))
+        {% endif %}
+        for v, s, a in zip(vals, scores, flags):
+            print(f"Received value: {v}, Score: {s}")
+            if a:
+                print(f"ALERT: Anomaly detected for value: {v}, Score: {s}")
+        {% endif %}
+    except Exception as e:
+        print(f"Error handling message: {e}")
+
+if __name__ == "__main__":
+    use_websockets =True if mqtt_webPath !="" else False
+
+    if use_websockets:
+        client = mqtt.Client(transport="websockets")
+    else:
+        client = mqtt.Client()
+
+    client.on_message = on_message
+
+    use_tls = mqtt_ssl
+
+    if use_tls:
+        client.tls_set()
+        client.tls_insecure_set(True)
+
+
+    if mqtt_username or mqtt_password:
+        client.username_pw_set(mqtt_username, mqtt_password or None)
+
+    try:
+        client.connect("{{ spec.broker.host }}", {{ spec.broker.port }})
+        client.subscribe("{{ spec.topic }}")
+        print(f"Subscribed to topic '{{ spec.topic }}'")
+        client.loop_forever()
+
+    except KeyboardInterrupt:
+
+        print("Streaming stopped by user.")
+        print(" Do you want to continue with the evaluation so far? (y/n)")
+        user_input = input().strip().lower()
+        {% if not is_river %}
+        vals, scores, flags = adapter.flush()
+        if vals is not None and scores is not None and flags is not None:
+            write_score(vals,scores)
+            write_anomalies(vals,flags)
+            print("Processing remaining buffered values...")
+            {% if spec.redis is not none %}
+            for v, s, a in zip(vals, scores, flags):
+                print(f"Received value: {v}, Score: {s}")
+                redis_client.rpush(redis_scores_key, json.dumps({"value": v, "score": s}))
+                if a:
+                    print(f"ALERT: Anomaly detected for value: {v}, Score: {s}")
+                    redis_client.rpush(redis_alerts_key, json.dumps({"value": v, "score": s}))
+            {% endif %}
+        {% endif %}
+
+        if user_input == "y":
+            if evaluation is None:
+                print("Evaluation cannot be performed — no Evaluation block was provided in the DSL.")
+                exit(0)
+              	
+            print("Continuing with evaluation...")
+            eval = evaluation
+
+            y_true_full = load_values(eval["labels_file"])
+            y_pred = load_values(eval["anomalies_file"])
+            if len(y_true_full) != len(y_pred):
+                print(f"[Warning] Labels and predictions have different lengths "
+                      f"({len(y_true_full)} vs {len(y_pred)}). Truncating to shortest.")
+
+            min_len = min(len(y_true_full), len(y_pred))
+            y_true = y_true_full[:min_len]
+            y_pred = y_pred[:min_len]
+            for metric in eval["metrics"]:
+                if metric == "F1Score":
+                    print("F1Score:", f1_score(y_true, y_pred))
+                elif metric == "Precision":
+                    print("Precision:", precision_score(y_true, y_pred))
+                elif metric == "Recall":
+                    print("Recall:", recall_score(y_true, y_pred))
+                elif metric == "Accuracy":
+                    print("Accuracy:", accuracy_score(y_true, y_pred))
+                elif metric == "ROCAUC":
+                    y_scores = load_values(eval["scores_file"])
+                    min_len = min(len(y_true_full), len(y_scores))
+                    y_true_roc = y_true_full[:min_len]
+                    y_scores = y_scores[:min_len]
+
+                    if len(set(y_true_roc)) < 2:
+                        print("ROCAUC: Cannot compute ROC AUC — only one class present in y_true.")
+                    else:
+                        print("ROCAUC:", roc_auc_score(y_true_roc, y_scores))
+
+        else:
+            print("Exiting without evaluation.")
+            exit(0)
+

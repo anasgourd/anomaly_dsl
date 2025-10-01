@@ -1,0 +1,171 @@
+ModelFile:
+    preprocesses+=Preprocessing*
+    profiles+=Profile*
+    brokers+=MQTTBroker*
+    redis_dbs+=RedisDB* 
+    evaluation=Evaluation?	
+    spec=AnomalySpec
+    
+;
+
+Preprocessing:
+    'Preprocessing' name=ID
+    'method:' method=ID
+    'end'
+;
+
+Profile:
+    'Profile' name=ID
+    'start_index' start_index=INT
+    'threshold' threshold=FLOAT
+    'end'
+;
+MQTTBroker:
+    'Broker<MQTT>' name=ID             
+    (
+        ('host:' host=STRING)?          
+        ('port:' port=INT)?    
+        ('ssl' ':' ssl=BOOL)?          
+        ('basePath:' basePath=STRING)? 
+        ('webPath:' webPath=STRING)?   
+        ('webPort:' webPort=INT)?      
+        ('auth' ':' auth=Authentication)?
+    )#
+    'end'
+;
+
+RedisDB:
+    'redis_db' name=ID
+    'host' host=STRING
+    'port' port=INT
+    'db' db=INT
+    ('key_scores' key_scores=STRING)?
+    ('key_alerts' key_alerts=STRING)?
+    'end'
+;
+
+Evaluation:
+    'Evaluation' name=ID
+    'data_file' data_file=STRING
+    'scores_file' scores_file=STRING
+    'labels_file' labels_file=STRING
+    'anomalies_file' anomalies_file=STRING
+    'metrics' metrics+=Metric (',' metrics+=Metric)*
+    'end'
+;
+
+Metric:
+    'F1Score' | 'Precision' | 'Recall' | 'ROCAUC' | 'Accuracy'
+;
+
+AnomalySpec:
+    'AnomalySpec' name=ID
+    'broker' broker=[MQTTBroker]
+    'topic' topic=STRING
+    'attribute' attribute=STRING
+    ('preprocessor' preprocessor=[Preprocessing])?
+    model=Model
+    'profile' profile=[Profile]
+    output=Output
+    alerts=AlertOutput
+    ('redis' redis=[RedisDB])?
+    'end'
+;
+
+Model:
+    StandardAbsoluteDeviation  | GaussianScorer | OneClassSVM | HalfSpaceTrees | SNARIMAX | CUSTOM
+;
+
+SNARIMAX:
+    'model' 'SNARIMAX'
+    (
+        '('
+        (
+            ('p=' p=INT)?
+            (',' 'd=' d=INT)?
+            (',' 'q=' q=INT)?
+            (',' 'm=' m=INT)?
+            (',' 'sd=' sd=INT)?
+            (',' 'regressor=' regressor=ID)?
+            (',' 'preprocessor=' preprocessor=[Preprocessing])?
+            (',' 'learning_rate=' learning_rate=FLOAT)?
+        )?
+        ')'
+    )?
+;
+
+HalfSpaceTrees:
+    'model' 'HalfSpaceTrees'
+    ('('
+        ('n_trees=' n_trees=INT)?
+        (',' 'height=' height=INT)?
+        (',' 'window_size=' window_size=INT)?
+        (',' 'seed=' seed=INT)?
+    ')')?
+;
+
+CUSTOM:
+    'model' 'CUSTOM' '(' (batch_size=INT)? ')'
+;
+
+OneClassSVM:
+    'model' 'OneClassSVM' '(' (nu=FLOAT)? ')'
+;
+StandardAbsoluteDeviation:
+    'model'  'StandardAbsoluteDeviation'
+    (param=STRING)?
+;
+
+
+GaussianScorer:
+    'model' 'GaussianScorer'
+    ('(' window_size=INT ')')?
+
+;
+
+Output:
+    OutputFile | OutputMQTT
+;
+
+OutputFile:
+    'output' path=STRING
+;
+
+OutputMQTT:
+    'output' topicBlock=TopicTarget
+;
+
+AlertOutput:
+    AlertFile | AlertMQTT
+;
+
+AlertFile:
+    'alerts' path=STRING
+;
+
+AlertMQTT:
+    'alerts' topicBlock=TopicTarget
+;
+
+TopicTarget:
+    'topic' topic=STRING
+    'broker' broker=[MQTTBroker]
+    'end'
+;
+
+
+
+Authentication: AuthPlain | AuthApiKey | AuthCert;
+
+AuthPlain:
+    'username' ':' username=STRING
+    'password' ':' password=STRING
+;
+
+AuthApiKey:
+    'key' ':' key=STRING
+;
+AuthCert:
+    ('cert' ':' cert=STRING) | ('certPath' ':' certPath=STRING)
+;
+
