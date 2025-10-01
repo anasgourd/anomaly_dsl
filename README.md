@@ -25,8 +25,9 @@ It was developed as part of my Diploma Thesis at the **School of Electrical & Co
 
 1. **Clone the repository**
    ```bash
-  git clone https://github.com/<username>/anomaly_dsl.git
-  cd anomaly_dsl
+   git clone https://github.com/<username>/anomaly_dsl.git
+   cd anomaly_dsl
+   '''
 
 2. **Install dependencies**
    - Minimal setup (DSL + streaming + core River models):
@@ -75,6 +76,7 @@ You can run the publisher as follows:
 
 ```bash
 python publishers/localhost_sender.py
+'''
 
 This will stream values (e.g., from `data.csv`) to the topic defined in the DSL.  
 The generated pipeline (running in another terminal) will consume these values and perform anomaly detection in real time.
