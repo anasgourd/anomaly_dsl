@@ -248,8 +248,20 @@ model CUSTOM(100)
 - ⚠️ It is strongly recommended to use a **virtual environment**  
   (e.g. `python -m venv anomaly_env` and then `source anomaly_env/bin/activate`)  
   to keep dependencies isolated.  
-- Once activated, you can run all scripts simply with `python ...`  
-  (instead of `python3`), since the virtual environment ensures the correct version.
+- MQTT Broker (**Mosquitto**) and Redis (**in-memory database**) must be installed  since they are required
+  for message transfer between the scripts and for storing data (flags, scores) during pipeline execution respectively.
+  On Ubuntu/Debian-based systems for example, you can install them simply with:
+  
+  ```bash
+  sudo apt install mosquitto mosquitto-clients
+  ```
+  ```bash
+  sudo apt install redis-server
+  ```
+- Although Redis can now run on Windows through **Memurai** (official Redis partner),  
+  Linux-based distributions (e.g. Ubuntu/Debian) are still recommended for best compatibility.
+
+  
 
 ### Steps
 
@@ -305,7 +317,8 @@ For the example setup in this repository, we use a **local MQTT broker**.
 You can run the publisher as follows:
 
 ```bash
-python publishers/localhost_sender.py
+cd  publishers
+python localhost_sender.py
 ```
 
 This will stream values (e.g., from `data.csv`) to the topic defined in the DSL.  
