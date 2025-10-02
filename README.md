@@ -255,7 +255,7 @@ model CUSTOM(100)
 
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/<username>/anomaly_dsl.git
+   git clone https://github.com/anasgourd/anomaly_dsl.git
    cd anomaly_dsl
    ```
 
