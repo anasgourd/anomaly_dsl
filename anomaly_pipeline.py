@@ -1,3 +1,6 @@
+# -*- coding: utf-8 -*-
+
+
 import time
 import paho.mqtt.client as mqtt
 from river import anomaly, compose, preprocessing, time_series, linear_model, optim,feature_extraction
